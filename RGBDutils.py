@@ -6,6 +6,7 @@ import collections
 
 import numpy as np
 from PIL import Image, ImageOps, ImageEnhance
+
 try:
     import accimage
 except ImportError:
@@ -20,7 +21,6 @@ from torchvision.transforms import functional as F
 from torchvision.transforms.transforms import _pil_interpolation_to_str
 
 import matplotlib.pyplot as plt
-
 
 __all__ = ["ImageFolder", "Compose", "ToTensor", "Normalize", "Resize", "CenterCrop", "RandomCrop",
            "RandomHorizontalFlip", "RandomVerticalFlip", "RandomResizedCrop", "imshow"]
@@ -407,9 +407,8 @@ if __name__ == "__main__":
     imshow(outRGB, outDepth, concat_vert=True, show_img=True)
     # imshow(imgsRGB[0], imgsDepth[0], concat_vert=False)
 
-
-# from torchvision import models
-# inputs = torch.randn(1,3,224,224)
-# resnet18 = models.resnet18()
-# y = resnet18(Variable(inputs))
-# print(y)
+    # from torchvision import models
+    # inputs = torch.randn(1,3,224,224)
+    # resnet18 = models.resnet18()
+    # y = resnet18(Variable(inputs))
+    # print(y)
