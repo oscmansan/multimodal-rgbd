@@ -1,33 +1,34 @@
-from __future__ import division
-import torch
+import os
 import math
 import random
-from PIL import Image, ImageOps, ImageEnhance
+import numbers
+import collections
 
 import numpy as np
+from PIL import Image, ImageOps, ImageEnhance
+try:
+    import accimage
+except ImportError:
+    accimage = None
 
+import torch
+import torch.utils.data as data
+from torch.autograd import Variable
 import torchvision
 from torchvision import datasets, models, transforms
 from torchvision.transforms import functional as F
-import torch.utils.data as data
+from torchvision.transforms.transforms import _pil_interpolation_to_str
+
 import matplotlib.pyplot as plt
 
-from torch.autograd import Variable
 
-
-import string
-import os
-import os.path
-import numbers
-
-__all__ = [ "ImageFolder","Compose", "ToTensor", "Normalize", "Resize", "Scale", 
-			"CenterCrop", "RandomCrop", "RandomHorizontalFlip", "RandomVerticalFlip", "RandomResizedCrop", "imshow"]
-
-
+__all__ = ["ImageFolder", "Compose", "ToTensor", "Normalize", "Resize", "CenterCrop", "RandomCrop",
+           "RandomHorizontalFlip", "RandomVerticalFlip", "RandomResizedCrop", "imshow"]
 
 # Data loader for (RGB, HHA) pairs
 # Based on torch.utils.data.ImageFolder
 IMG_EXTENSIONS = ['.jpg', '.jpeg', '.png', '.ppm', '.bmp', '.pgm']
+
 
 def is_image_file(filename):
     filename_lower = filename.lower()
@@ -35,8 +36,8 @@ def is_image_file(filename):
 
 
 def find_classes(dir):
-#     print(dir)
-#     print(os.listdir(dir))
+    # print(dir)
+    # print(os.listdir(dir))
     classes = [d for d in os.listdir(dir) if os.path.isdir(os.path.join(dir, d))]
     classes.sort()
     class_to_idx = {classes[i]: i for i in range(len(classes))}
@@ -47,25 +48,25 @@ def make_dataset(dir, class_to_idx):
     images = []
     dir = os.path.expanduser(dir)
     dirRGB = os.path.join(dir, 'rgb')
-#     dirDepth = os.path.expanduser(dirDepth)
+    # dirDepth = os.path.expanduser(dirDepth)
     for target in sorted(os.listdir(dirRGB)):
-#         print(target)
+        # print(target)
         dRGB = os.path.join(dirRGB, target)
-#         d = os.path.join(dir, target)
+        # d = os.path.join(dir, target)
         if not os.path.isdir(dRGB):
             continue
 
         for root, _, fnames in sorted(os.walk(dRGB)):
-#             print(root)
-            
+            # print(root)
+
             for fname in sorted(fnames):
                 if is_image_file(fname):
                     pathRGB = os.path.join(root, fname)
-                    pathDepth = pathRGB.replace('/rgb/','/hha/') 
+                    pathDepth = pathRGB.replace('/rgb/', '/hha/')
                     item = (pathRGB, pathDepth, class_to_idx[target])
-#                    item = (pathRGB, class_to_idx[target])
+                    # item = (pathRGB, class_to_idx[target])
                     images.append(item)
-#                    print(type(images))
+                    # print(type(images))
 
     return images
 
@@ -78,7 +79,6 @@ def pil_loader(path):
 
 
 def accimage_loader(path):
-    import accimage
     try:
         return accimage.Image(path)
     except IOError:
@@ -92,6 +92,7 @@ def default_loader(path):
         return accimage_loader(path)
     else:
         return pil_loader(path)
+
 
 class ImageFolder(data.Dataset):
     """An RGB-D data loader where the images are arranged in this way: ::
@@ -124,14 +125,14 @@ class ImageFolder(data.Dataset):
 
     def __init__(self, root, transform=None, target_transform=None,
                  loader=default_loader):
-        
+        # Use RGB as reference. Depth/HHA must replicate same structure and file names
         rootRGB = os.path.join(root, 'rgb')
-        classes, class_to_idx = find_classes(rootRGB) # Use RGB as reference. Depth/HHA must replicate same structure and file names
+        classes, class_to_idx = find_classes(rootRGB)
 
         imgs = make_dataset(root, class_to_idx)
         if len(imgs) == 0:
-            raise(RuntimeError("Found 0 images in subfolders of: " + root + "\n"
-                               "Supported image extensions are: " + ",".join(IMG_EXTENSIONS)))
+            raise (RuntimeError("Found 0 images in subfolders of: " + root + "\n"
+                                "Supported image extensions are: " + ",".join(IMG_EXTENSIONS)))
 
         self.root = root
         self.imgs = imgs
@@ -142,20 +143,17 @@ class ImageFolder(data.Dataset):
         self.loader = loader
 
     def __getitem__(self, index):
-
         pathRGB, pathDepth, target = self.imgs[index]
         imgRGB = self.loader(pathRGB)
         imgDepth = self.loader(pathDepth)
 
-        
-        
         if self.transform is not None:
             imgRGB, imgDepth = self.transform(imgRGB, imgDepth)
-#            img_pair  = self.transform(img_pair)
+        #            img_pair  = self.transform(img_pair)
         if self.target_transform is not None:
             target = self.target_transform(target)
 
-#        return img_pair, target
+        #        return img_pair, target
         return imgRGB, imgDepth, target
 
     def __len__(self):
@@ -173,7 +171,6 @@ class ImageFolder(data.Dataset):
 
 
 # RGB-D transforms
-
 class Compose(object):
     def __init__(self, transforms):
         self.transforms = transforms
@@ -191,13 +188,15 @@ class Compose(object):
         format_string += '\n)'
         return format_string
 
+
 class ToTensor(object):
     def __call__(self, imgRGB, imgDepth):
         return F.to_tensor(imgRGB), F.to_tensor(imgDepth)
 
     def __repr__(self):
         return self.__class__.__name__ + '()'
-        
+
+
 class Normalize(object):
     def __init__(self, meanRGB, stdRGB, meanDepth, stdDepth):
         self.meanRGB = meanRGB
@@ -206,12 +205,14 @@ class Normalize(object):
         self.stdDepth = stdDepth
 
     def __call__(self, tensorRGB, tensorDepth):
-       return F.normalize(tensorRGB, self.meanRGB, self.stdRGB), F.normalize(tensorDepth, self.meanDepth, self.stdDepth)
+        return F.normalize(tensorRGB, self.meanRGB, self.stdRGB), F.normalize(tensorDepth, self.meanDepth,
+                                                                              self.stdDepth)
 
     def __repr__(self):
         return self.__class__.__name__ + '(meanRGB={0}, stdRGB={1},meanDepth={2}, stdDepth={3})'.format(
-                self.meanRGB, self.stdRGB, self.meanDepth, self.stdDepth)
-        
+            self.meanRGB, self.stdRGB, self.meanDepth, self.stdDepth)
+
+
 class Resize(object):
     def __init__(self, size, interpolation=Image.BILINEAR):
         assert isinstance(size, int) or (isinstance(size, collections.Iterable) and len(size) == 2)
@@ -224,7 +225,8 @@ class Resize(object):
     def __repr__(self):
         interpolate_str = _pil_interpolation_to_str[self.interpolation]
         return self.__class__.__name__ + '(size={0}, interpolation={1})'.format(self.size, interpolate_str)
-    
+
+
 class CenterCrop(object):
     def __init__(self, size):
         if isinstance(size, numbers.Number):
@@ -330,7 +332,9 @@ class RandomResizedCrop(object):
 
     def __call__(self, imgRGB, imgDepth):
         i, j, h, w = self.get_params(imgRGB, self.scale, self.ratio)
-        return F.resized_crop(imgRGB, i, j, h, w, self.size, self.interpolation), F.resized_crop(imgDepth, i, j, h, w, self.size, self.interpolation)
+        return F.resized_crop(imgRGB, i, j, h, w, self.size, self.interpolation), F.resized_crop(imgDepth, i, j, h, w,
+                                                                                                 self.size,
+                                                                                                 self.interpolation)
 
     def __repr__(self):
         interpolate_str = _pil_interpolation_to_str[self.interpolation]
@@ -340,83 +344,72 @@ class RandomResizedCrop(object):
         format_string += ', interpolation={0})'.format(interpolate_str)
         return format_string
 
+
 # Visualize RGB-D images
-def imshow(imgRGB, imgDepth, title=None, concat_vert=False, mean_RGB=[0.485, 0.456, 0.406], 
-               mean_depth=[0.485, 0.456, 0.406], std_RGB=[0.229, 0.224, 0.225], 
-               std_depth=[0.229, 0.224, 0.225], show_img=True):
+def imshow(imgRGB, imgDepth, title=None, concat_vert=False, mean_RGB=[0.485, 0.456, 0.406],
+           mean_depth=[0.485, 0.456, 0.406], std_RGB=[0.229, 0.224, 0.225],
+           std_depth=[0.229, 0.224, 0.225], show_img=True):
     """Imshow for RGB-D data."""
     imgRGB = imgRGB.numpy().transpose((1, 2, 0))
     imgRGB = np.clip(np.array(std_RGB) * imgRGB + np.array(mean_RGB), 0, 1)
     imgDepth = imgDepth.numpy().transpose((1, 2, 0))
     imgDepth = np.clip(np.array(std_depth) * imgDepth + np.array(mean_depth), 0, 1)
     if concat_vert:
-        img = np.concatenate((imgRGB, imgDepth),axis=0)
+        img = np.concatenate((imgRGB, imgDepth), axis=0)
     else:
-        img = np.concatenate((imgRGB, imgDepth),axis=1)
-    
+        img = np.concatenate((imgRGB, imgDepth), axis=1)
+
     if show_img:
         plt.imshow(img)
         if title is not None:
             plt.title(title)
-            
+
         plt.axis('off')
-#        plt.pause(0.001)  # pause a bit so that plots are updated
+        # plt.pause(0.001)  # pause a bit so that plots are updated
         plt.show()
     else:
         return img
 
 
-
-
-
 if __name__ == "__main__":
     # Test RGB-D data loader, transforms and utilities
-    RGB_AVG, RGB_STD = [0.485, 0.456, 0.406], [0.229, 0.224, 0.225] # Default ImageNet ILSRVC2012
-    DEPTH_AVG, DEPTH_STD = [0.485, 0.456, 0.406], [0.229, 0.224, 0.225] # Default ImageNet ILSRVC2012
-    
-    import matplotlib.pyplot as plt
-    import torch
-    import torchvision
-    from torchvision import datasets, models, transforms
-    import numpy as np
-    import os
-    import utils
-    
-    data_dir = 'sunrgbd/256'
+    RGB_AVG, RGB_STD = [0.485, 0.456, 0.406], [0.229, 0.224, 0.225]  # Default ImageNet ILSRVC2012
+    DEPTH_AVG, DEPTH_STD = [0.485, 0.456, 0.406], [0.229, 0.224, 0.225]  # Default ImageNet ILSRVC2012
+
+    # data_dir = 'sunrgbd/256'
     data_dir = 'sunrgbd/256_lite'
-    
-#    data_transforms = Compose([Resize(224),
-#                                   RandomHorizontalFlip(),
-#                                   ToTensor(), 
-#                                   Normalize(RGB_AVG, RGB_STD,DEPTH_AVG, DEPTH_STD)])
-#    data_transforms = Compose([RandomResizedCrop(224),
-#                                   ToTensor(), 
-#                                   Normalize(RGB_AVG, RGB_STD,DEPTH_AVG, DEPTH_STD)])
+
+    # data_transforms = Compose([Resize(224),
+    #                            RandomHorizontalFlip(),
+    #                            ToTensor(),
+    #                            Normalize(RGB_AVG, RGB_STD,DEPTH_AVG, DEPTH_STD)])
+    # data_transforms = Compose([RandomResizedCrop(224),
+    #                            ToTensor(),
+    #                            Normalize(RGB_AVG, RGB_STD,DEPTH_AVG, DEPTH_STD)])
     data_transforms = Compose([CenterCrop(224),
-                                   ToTensor(), 
-                                   Normalize(RGB_AVG, RGB_STD,DEPTH_AVG, DEPTH_STD)])
+                               ToTensor(),
+                               Normalize(RGB_AVG, RGB_STD, DEPTH_AVG, DEPTH_STD)])
 
     rgbd_dataset = ImageFolder(os.path.join(data_dir, 'train'), data_transforms)
-    dataloader = torch.utils.data.DataLoader(rgbd_dataset, batch_size=4,shuffle=True, num_workers=4)
+    dataloader = torch.utils.data.DataLoader(rgbd_dataset, batch_size=4, shuffle=True, num_workers=4)
     class_names = rgbd_dataset.classes
 
     print(class_names)
-    
+
     rgbd_iter = iter(dataloader)
 
-    
     # Get a batch of training data
     imgsRGB, imgsDepth, labels = next(rgbd_iter)
 
     # Make a grid from batch
     outRGB = torchvision.utils.make_grid(imgsRGB)
     outDepth = torchvision.utils.make_grid(imgsDepth)
-#
     imshow(outRGB, outDepth, concat_vert=True, show_img=True)
-#    imshow(imgsRGB[0], imgsDepth[0], concat_vert=False)
+    # imshow(imgsRGB[0], imgsDepth[0], concat_vert=False)
 
-    # from torchvision import models
-    # inputs = torch.randn(1,3,224,224)
-    # resnet18 = models.resnet18()
-    # y = resnet18(Variable(inputs))
-    # print(y)
+
+# from torchvision import models
+# inputs = torch.randn(1,3,224,224)
+# resnet18 = models.resnet18()
+# y = resnet18(Variable(inputs))
+# print(y)
