@@ -4,30 +4,63 @@ import time
 import copy
 
 import torch
-from torchvision import datasets, models, transforms
+from torchvision import models
 from torch.utils.data import DataLoader
 import torch.nn as nn
 import torch.optim as optim
 from torch.optim import lr_scheduler
 
+import RGBDutils
+
 
 def parse_args():
     parser = argparse.ArgumentParser()
     parser.add_argument('--dataset-dir', type=str, default='/home/mcv/datasets/sunrgbd_lite')
-    parser.add_argument('--modality', type=str, choices=['rgb', 'hha'], default='rgb')
     parser.add_argument('--epochs', type=int, default=25)
-    parser.add_argument('--batch-size', type=int, default=32)
+    parser.add_argument('--batch-size', type=int, default=64)
     return parser.parse_args()
 
 
+class RGBDnet(nn.Module):
+    def __init__(self, num_classes):
+        super(RGBDnet, self).__init__()
+
+        # RGB branch
+        model_rgb = models.alexnet(pretrained=True)
+        self.rgb_convs = model_rgb.features
+        c = model_rgb.classifier
+        self.rgb_fcs = nn.Sequential(c[0], c[1], c[2], c[3], c[4], c[5])
+        num_ftrs_rgb = c[4].out_features
+
+        # HHA branch
+        model_hha = models.alexnet(pretrained=True)
+        self.hha_convs = model_hha.features
+        c = model_hha.classifier
+        self.hha_fcs = nn.Sequential(c[0], c[1], c[2], c[3], c[4], c[5])
+        num_ftrs_hha = c[4].out_features
+
+        # classifier
+        self.classifier = nn.Linear(num_ftrs_rgb + num_ftrs_hha, num_classes)
+
+    def forward(self, x):
+        x_rgb = self.rgb_convs(x[0])
+        x_rgb = x_rgb.view(x_rgb.size(0), -1)
+        x_hha = self.hha_convs(x[1])
+        x_hha = x_hha.view(x_hha.size(0), -1)
+        x_rgb = self.rgb_fcs(x_rgb)
+        x_hha = self.hha_fcs(x_hha)
+        x = torch.cat((x_rgb, x_hha), 1)
+        x = self.classifier(x)
+        return x
+
+
 def build_model(num_classes):
-    model = models.alexnet(pretrained=True)
+    model = RGBDnet(num_classes=num_classes)
 
-    for param in model.parameters():
-        param.requires_grad = False
-
-    num_ftrs = model.classifier[6].in_features
-    model.classifier[6] = nn.Linear(num_ftrs, num_classes)
+    for module in model.children():
+        if module != model.classifier:
+            for param in module.parameters():
+                param.requires_grad = False
 
     return model
 
@@ -72,16 +105,18 @@ def train_epoch(dataloader, model, criterion, optimizer, use_gpu):
     running_corrects = 0
 
     for data in dataloader:
-        inputs, labels = data
+        # get the inputs
+        inputs_rgb, inputs_hha, labels = data
         if use_gpu:
-            inputs = inputs.cuda()
+            inputs_rgb = inputs_rgb.cuda()
+            inputs_hha = inputs_hha.cuda()
             labels = labels.cuda()
 
         # zero the parameter gradients
         optimizer.zero_grad()
 
         # forward
-        outputs = model(inputs)
+        outputs = model((inputs_rgb, inputs_hha))
         _, preds = torch.max(outputs.data, 1)
         loss = criterion(outputs, labels)
 
@@ -106,13 +141,15 @@ def evaluate_model(dataloader, model, criterion, use_gpu):
     running_corrects = 0
 
     for data in dataloader:
-        inputs, labels = data
+        # get the inputs
+        inputs_rgb, inputs_hha, labels = data
         if use_gpu:
-            inputs = inputs.cuda()
+            inputs_rgb = inputs_rgb.cuda()
+            inputs_hha = inputs_hha.cuda()
             labels = labels.cuda()
 
         # forward
-        outputs = model(inputs)
+        outputs = model((inputs_rgb, inputs_hha))
         _, preds = torch.max(outputs.data, 1)
         loss = criterion(outputs, labels)
 
@@ -132,30 +169,34 @@ def main():
     use_gpu = torch.cuda.is_available()
 
     # data augmentation and normalization for training
+    RGB_AVG = [0.485, 0.456, 0.406]  # default ImageNet ILSRVC2012
+    RGB_STD = [0.229, 0.224, 0.225]  # default ImageNet ILSRVC2012
+    DEPTH_AVG = [0.485, 0.456, 0.406]  # default ImageNet ILSRVC2012
+    DEPTH_STD = [0.229, 0.224, 0.225]  # default ImageNet ILSRVC2012
     data_transforms = {
-        'train': transforms.Compose([
-            transforms.RandomResizedCrop(224),
-            transforms.RandomHorizontalFlip(),
-            transforms.ToTensor(),
-            transforms.Normalize([0.485, 0.456, 0.406], [0.229, 0.224, 0.225])
+        'train': RGBDutils.Compose([
+            RGBDutils.RandomResizedCrop(227),
+            RGBDutils.RandomHorizontalFlip(),
+            RGBDutils.ToTensor(),
+            RGBDutils.Normalize(RGB_AVG, RGB_STD, DEPTH_AVG, DEPTH_STD)
         ]),
-        'val': transforms.Compose([
-            transforms.Resize(256),
-            transforms.CenterCrop(224),
-            transforms.ToTensor(),
-            transforms.Normalize([0.485, 0.456, 0.406], [0.229, 0.224, 0.225])
+        'val': RGBDutils.Compose([
+            RGBDutils.Resize(256),
+            RGBDutils.CenterCrop(227),
+            RGBDutils.ToTensor(),
+            RGBDutils.Normalize(RGB_AVG, RGB_STD, DEPTH_AVG, DEPTH_STD)
         ]),
-        'test': transforms.Compose([
-            transforms.Resize(256),
-            transforms.CenterCrop(224),
-            transforms.ToTensor(),
-            transforms.Normalize([0.485, 0.456, 0.406], [0.229, 0.224, 0.225])
+        'test': RGBDutils.Compose([
+            RGBDutils.Resize(256),
+            RGBDutils.CenterCrop(227),
+            RGBDutils.ToTensor(),
+            RGBDutils.Normalize(RGB_AVG, RGB_STD, DEPTH_AVG, DEPTH_STD)
         ]),
     }
 
     # prepare dataset and dataloaders
     partitions = ['train', 'val', 'test']
-    image_datasets = {x: datasets.ImageFolder(os.path.join(args.dataset_dir, x, args.modality), data_transforms[x])
+    image_datasets = {x: RGBDutils.ImageFolder(os.path.join(args.dataset_dir, x), data_transforms[x])
                       for x in partitions}
     dataloaders = {x: DataLoader(image_datasets[x], batch_size=args.batch_size, shuffle=(x == 'train'), num_workers=4)
                    for x in partitions}
