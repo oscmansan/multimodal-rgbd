@@ -21,23 +21,47 @@ def parse_args():
     return parser.parse_args()
 
 
-class RGBDnet(nn.Module):
+class EmbeddingNet(nn.Module):
+    def __init__(self, dims):
+        super().__init__()
+
+        model = models.resnet18(pretrained=True)
+
+        self.features = nn.Sequential(
+            model.conv1,
+            model.bn1,
+            model.relu,
+            model.maxpool,
+            model.layer1,
+            model.layer2,
+            model.layer3,
+            model.layer4,
+            model.avgpool
+        )
+        self.fc = nn.Linear(model.fc.in_features, dims)
+
+    def forward(self, x):
+        x = self.features(x)
+        x = x.view(x.size(0), -1)
+        x = self.fc(x)
+        return x
+
+
+class RGBDNet(nn.Module):
     def __init__(self, num_classes):
-        super(RGBDnet, self).__init__()
+        super(RGBDNet, self).__init__()
 
         # RGB branch
-        model_rgb = models.alexnet(pretrained=True)
+        model_rgb = EmbeddingNet(dims=2048)
         self.rgb_convs = model_rgb.features
-        c = model_rgb.classifier
-        self.rgb_fcs = nn.Sequential(c[0], c[1], c[2], c[3], c[4], c[5])
-        num_ftrs_rgb = c[4].out_features
+        self.rgb_fcs = model_rgb.fc
+        num_ftrs_rgb = model_rgb.fc.out_features
 
         # HHA branch
-        model_hha = models.alexnet(pretrained=True)
+        model_hha = EmbeddingNet(dims=2048)
         self.hha_convs = model_hha.features
-        c = model_hha.classifier
-        self.hha_fcs = nn.Sequential(c[0], c[1], c[2], c[3], c[4], c[5])
-        num_ftrs_hha = c[4].out_features
+        self.hha_fcs = model_hha.fc
+        num_ftrs_hha = model_hha.fc.out_features
 
         # classifier
         self.classifier = nn.Linear(num_ftrs_rgb + num_ftrs_hha, num_classes)
@@ -55,12 +79,12 @@ class RGBDnet(nn.Module):
 
 
 def build_model(num_classes):
-    model = RGBDnet(num_classes=num_classes)
+    model = RGBDNet(num_classes=num_classes)
 
-    for module in model.children():
-        if module != model.classifier:
-            for param in module.parameters():
-                param.requires_grad = False
+    # freeze weights
+    for module in [model.rgb_convs, model.rgb_fcs, model.hha_convs]:
+        for param in module.parameters():
+            param.requires_grad = False
 
     return model
 
@@ -205,6 +229,8 @@ def main():
     # instantiate the model
     model = build_model(num_classes=len(image_datasets['train'].classes))
     print(model)
+    print('requires_grad:', [name for name, param in model.named_parameters() if param.requires_grad])
+
     if use_gpu:
         model = model.cuda()
 
