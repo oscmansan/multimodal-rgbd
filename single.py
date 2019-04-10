@@ -16,7 +16,7 @@ def parse_args():
     parser.add_argument('--dataset-dir', type=str, default='/home/mcv/datasets/sunrgbd_lite')
     parser.add_argument('--modality', type=str, choices=['rgb', 'hha'], default='rgb')
     parser.add_argument('--epochs', type=int, default=25)
-    parser.add_argument('--batch-size', type=int, default=32)
+    parser.add_argument('--batch-size', type=int, default=4)
     return parser.parse_args()
 
 
@@ -169,7 +169,8 @@ def main():
 
     criterion = nn.CrossEntropyLoss()
     optimizer = torch.optim.Adam(model.parameters(), lr=0.001)
-    scheduler = lr_scheduler.ReduceLROnPlateau(optimizer, patience=2)
+    #scheduler = lr_scheduler.ReduceLROnPlateau(optimizer, patience=2)
+    scheduler = None
 
     # train
     model = train_model(dataloaders, model, criterion, optimizer, scheduler, args.epochs, use_gpu)

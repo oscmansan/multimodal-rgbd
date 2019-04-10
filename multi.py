@@ -210,7 +210,8 @@ def main():
 
     criterion = nn.CrossEntropyLoss()
     optimizer = torch.optim.Adam(model.parameters(), lr=0.001)
-    scheduler = lr_scheduler.ReduceLROnPlateau(optimizer, patience=2)
+    #scheduler = lr_scheduler.ReduceLROnPlateau(optimizer, patience=2)
+    scheduler = None
 
     # train
     model = train_model(dataloaders, model, criterion, optimizer, scheduler, args.epochs, use_gpu)
