@@ -22,7 +22,7 @@ def parse_args():
 
 
 class EmbeddingNet(nn.Module):
-    def __init__(self, dims):
+    def __init__(self, dims=512):
         super().__init__()
 
         model = models.resnet18(pretrained=True)
@@ -36,12 +36,13 @@ class EmbeddingNet(nn.Module):
             model.layer2,
             model.layer3,
             model.layer4,
-            model.avgpool
         )
-        self.fc = nn.Linear(model.fc.in_features, dims)
+        self.avgpool = nn.AdaptiveAvgPool2d((1, 1))
+        self.fc = nn.Linear(512 * 1 * 1, dims)
 
     def forward(self, x):
         x = self.features(x)
+        x = self.avgpool(x)
         x = x.view(x.size(0), -1)
         x = self.fc(x)
         return x
@@ -49,32 +50,44 @@ class EmbeddingNet(nn.Module):
 
 class RGBDNet(nn.Module):
     def __init__(self, num_classes):
-        super(RGBDNet, self).__init__()
+        super().__init__()
 
         # RGB branch
-        model_rgb = EmbeddingNet(dims=2048)
+        model_rgb = EmbeddingNet()
         self.rgb_convs = model_rgb.features
-        self.rgb_fcs = model_rgb.fc
-        num_ftrs_rgb = model_rgb.fc.out_features
+        num_planes_rgb = 512
 
         # HHA branch
-        model_hha = EmbeddingNet(dims=2048)
+        model_hha = EmbeddingNet()
         self.hha_convs = model_hha.features
-        self.hha_fcs = model_hha.fc
-        num_ftrs_hha = model_hha.fc.out_features
+        num_planes_hha = 512
+
+        self.conv = nn.Sequential(
+            nn.Conv2d(num_planes_rgb + num_planes_hha, 512, kernel_size=1, bias=False),
+            nn.BatchNorm2d(512, affine=False),
+            nn.ReLU(inplace=True)
+        )
+        self.avgpool = nn.AdaptiveAvgPool2d((1, 1))
 
         # classifier
-        self.classifier = nn.Linear(num_ftrs_rgb + num_ftrs_hha, num_classes)
+        self.classifier = nn.Sequential(
+            nn.Dropout(),
+            nn.Linear(512 * 1 * 1, 512),
+            nn.ReLU(inplace=True),
+            nn.Linear(512, num_classes)
+        )
 
     def forward(self, x):
         x_rgb = self.rgb_convs(x[0])
-        x_rgb = x_rgb.view(x_rgb.size(0), -1)
         x_hha = self.hha_convs(x[1])
-        x_hha = x_hha.view(x_hha.size(0), -1)
-        x_rgb = self.rgb_fcs(x_rgb)
-        x_hha = self.hha_fcs(x_hha)
+
         x = torch.cat((x_rgb, x_hha), 1)
+        x = self.conv(x)
+        x = self.avgpool(x)
+
+        x = x.view(x.size(0), -1)
         x = self.classifier(x)
+
         return x
 
 
@@ -82,7 +95,7 @@ def build_model(num_classes):
     model = RGBDNet(num_classes=num_classes)
 
     # freeze weights
-    for module in [model.rgb_convs, model.rgb_fcs, model.hha_convs]:
+    for module in [model.rgb_convs, model.hha_convs]:
         for param in module.parameters():
             param.requires_grad = False
 
